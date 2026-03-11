@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install mongoose cors bcryptjs jsonwebtoken concurrently @types/cors @types/bcryptjs @types/jsonwebtoken)",
+      "Bash(xargs ls -lt)",
+      "Bash(pgrep -x mongod)",
+      "Bash(mongosh --eval \"db.runCommand\\(''ping''\\)\" --quiet)",
+      "Bash(mongosh --quiet --eval \"use\\(''banglalink-shift-manager''\\); JSON.stringify\\({users: db.users.countDocuments\\(\\), employees: db.employees.countDocuments\\(\\), shifts: db.shifts.countDocuments\\(\\), alerts: db.alerts.countDocuments\\(\\)}\\)\")",
+      "Bash(npm run seed)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(npm install exceljs)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(lsof -ti:3000)",
+      "Bash(xargs kill -9)",
+      "Bash(lsof -ti:4000)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d[''''version'''']\\)\")"
+    ]
+  }
+}
