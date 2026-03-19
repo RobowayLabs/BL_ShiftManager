@@ -18,7 +18,8 @@
       "Bash(mkdir -p /Users/mdarifinahmedrafi/banglalink-shift-manager/app/api/auth/users/'[id]')",
       "Bash(mkdir -p /Users/mdarifinahmedrafi/banglalink-shift-manager/app/api/employees/'[employeeId]'/performance)",
       "Bash(mkdir -p /Users/mdarifinahmedrafi/banglalink-shift-manager/app/api/shifts/'[shiftId]')",
-      "Bash(mkdir -p /Users/mdarifinahmedrafi/banglalink-shift-manager/app/api/alerts/'[alertId]'/acknowledge)"
+      "Bash(mkdir -p /Users/mdarifinahmedrafi/banglalink-shift-manager/app/api/alerts/'[alertId]'/acknowledge)",
+      "Bash(npm run:*)"
     ]
   }
 }

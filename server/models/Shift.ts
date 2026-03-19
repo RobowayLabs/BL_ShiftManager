@@ -65,8 +65,7 @@ const ShiftSchema = new Schema<IShift>(
   { timestamps: true }
 );
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(ShiftSchema as any).pre('save', function (this: any, next: () => void) {
+ShiftSchema.pre('save', async function () {
   if (!this.startTime || !this.endTime) {
     const times = SHIFT_TIMES[this.type as string];
     if (times) {
@@ -74,7 +73,6 @@ const ShiftSchema = new Schema<IShift>(
       this.endTime = times.end;
     }
   }
-  next();
 });
 
 ShiftSchema.index({ employeeId: 1, date: 1 });
