@@ -22,7 +22,7 @@ from pathlib import Path
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-API_BASE    = "http://localhost:3000/api/sync"
+API_BASE    = "https://bl-shift-manager.vercel.app/api/sync"
 API_KEY     = "bl-sync-key-change-me-in-production"  # must match server .env SYNC_API_KEY
 SQLITE_PATH = "./sentinel.db"
 STATE_FILE  = "./sync_state.json"
