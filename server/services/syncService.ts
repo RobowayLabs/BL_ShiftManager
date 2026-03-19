@@ -49,32 +49,42 @@ interface SyncDailySummary {
   phoneCount: number;
   absenceSec: number;
   productivity: number;
+  syncedAt?: string; // ISO timestamp from PyQt5 — used as optimistic lock
 }
 
-export async function processEmployeeSync(employees: SyncEmployee[], sourceIp: string) {
-  let processed = 0;
-  const errors: { index: number; employeeId: string; error: string }[] = [];
+const severityToType: Record<string, string> = {
+  high: 'Critical',
+  critical: 'Critical',
+  medium: 'Warning',
+  low: 'Info',
+};
 
-  for (let i = 0; i < employees.length; i++) {
-    const emp = employees[i];
-    try {
-      await Employee.findOneAndUpdate(
-        { employeeId: emp.employeeId },
-        {
-          $set: {
-            name: emp.name,
-            department: emp.department || 'Unassigned',
-            active: emp.active !== undefined ? emp.active : true,
-            lastSyncedAt: new Date(),
+export async function processEmployeeSync(employees: SyncEmployee[], sourceIp: string) {
+  const errors: { index: number; employeeId: string; error: string }[] = [];
+  let processed = 0;
+
+  // Run all upserts concurrently
+  await Promise.all(
+    employees.map(async (emp, i) => {
+      try {
+        await Employee.findOneAndUpdate(
+          { employeeId: emp.employeeId },
+          {
+            $set: {
+              name: emp.name,
+              department: emp.department || 'Unassigned',
+              active: emp.active !== undefined ? emp.active : true,
+              lastSyncedAt: new Date(),
+            },
           },
-        },
-        { upsert: true }
-      );
-      processed++;
-    } catch (err: any) {
-      errors.push({ index: i, employeeId: emp.employeeId, error: err.message });
-    }
-  }
+          { upsert: true }
+        );
+        processed++;
+      } catch (err: any) {
+        errors.push({ index: i, employeeId: emp.employeeId, error: err.message });
+      }
+    })
+  );
 
   await SyncLog.create({
     direction: 'pyqt_to_web',
@@ -89,25 +99,27 @@ export async function processEmployeeSync(employees: SyncEmployee[], sourceIp: s
 }
 
 export async function processAttendanceEventSync(events: SyncAttendanceEvent[], sourceIp: string) {
-  let processed = 0;
   const errors: { index: number; employeeId: string; error: string }[] = [];
+  let processed = 0;
 
-  for (let i = 0; i < events.length; i++) {
-    const evt = events[i];
-    try {
-      await Attendance.create({
-        employeeId: evt.employeeId,
-        cameraId: evt.cameraId,
-        eventType: evt.eventType,
-        status: evt.status || 'verified',
-        shiftId: evt.shiftId,
-        recognizedAt: new Date(evt.recognizedAt),
-      });
-      processed++;
-    } catch (err: any) {
-      errors.push({ index: i, employeeId: evt.employeeId, error: err.message });
-    }
-  }
+  // Run all inserts concurrently
+  await Promise.all(
+    events.map(async (evt, i) => {
+      try {
+        await Attendance.create({
+          employeeId: evt.employeeId,
+          cameraId: evt.cameraId,
+          eventType: evt.eventType,
+          status: evt.status || 'verified',
+          shiftId: evt.shiftId,
+          recognizedAt: new Date(evt.recognizedAt),
+        });
+        processed++;
+      } catch (err: any) {
+        errors.push({ index: i, employeeId: evt.employeeId, error: err.message });
+      }
+    })
+  );
 
   await SyncLog.create({
     direction: 'pyqt_to_web',
@@ -126,42 +138,43 @@ export async function processAlertSync(alerts: SyncAlert[], sourceIp: string) {
   let skipped = 0;
   const errors: { index: number; error: string }[] = [];
 
-  const severityToType: Record<string, string> = {
-    high: 'Critical',
-    critical: 'Critical',
-    medium: 'Warning',
-    low: 'Info',
-  };
-
-  for (let i = 0; i < alerts.length; i++) {
-    const alt = alerts[i];
-    try {
-      const existing = await Alert.findOne({ alertId: `SYNC-${alt.localId}` });
-      if (existing) {
-        skipped++;
-        continue;
+  // Use atomic upsert with $setOnInsert to eliminate TOCTOU race:
+  // If the alertId already exists → no-op (skipped).
+  // If it doesn't → creates it atomically. Safe under concurrent pushes.
+  await Promise.all(
+    alerts.map(async (alt, i) => {
+      try {
+        const alertType = severityToType[alt.severity || 'medium'] || 'Warning';
+        const result = await Alert.updateOne(
+          { alertId: `SYNC-${alt.localId}` },
+          {
+            $setOnInsert: {
+              alertId: `SYNC-${alt.localId}`,
+              timestamp: new Date(alt.timestamp),
+              type: alertType,
+              category: alt.alertType,
+              severity: alt.severity || 'medium',
+              message: alt.message || `${alt.alertType} detected: ${alt.employeeName || alt.employeeId}`,
+              source: alt.cameraId || 'Desktop',
+              employeeId: alt.employeeId,
+              cameraId: alt.cameraId,
+              shiftLabel: alt.shiftLabel,
+              acknowledged: false,
+            },
+          },
+          { upsert: true }
+        );
+        // upsertedCount === 1 → new doc created; modifiedCount === 0 → already existed
+        if (result.upsertedCount === 1) {
+          processed++;
+        } else {
+          skipped++;
+        }
+      } catch (err: any) {
+        errors.push({ index: i, error: err.message });
       }
-
-      const alertType = severityToType[alt.severity || 'medium'] || 'Warning';
-
-      await Alert.create({
-        alertId: `SYNC-${alt.localId}`,
-        timestamp: new Date(alt.timestamp),
-        type: alertType,
-        category: alt.alertType,
-        severity: alt.severity || 'medium',
-        message: alt.message || `${alt.alertType} detected: ${alt.employeeName || alt.employeeId}`,
-        source: alt.cameraId || 'Desktop',
-        employeeId: alt.employeeId,
-        cameraId: alt.cameraId,
-        shiftLabel: alt.shiftLabel,
-        acknowledged: false,
-      });
-      processed++;
-    } catch (err: any) {
-      errors.push({ index: i, error: err.message });
-    }
-  }
+    })
+  );
 
   await SyncLog.create({
     direction: 'pyqt_to_web',
@@ -179,12 +192,23 @@ export async function processDailySummarySync(summaries: SyncDailySummary[], sou
   let processed = 0;
   const errors: { index: number; employeeId: string; error: string }[] = [];
 
-  for (let i = 0; i < summaries.length; i++) {
-    const s = summaries[i];
-    try {
-      await DailySummary.findOneAndUpdate(
-        { employeeId: s.employeeId, date: s.date },
-        {
+  // Build a bulkWrite batch — one updateOne per summary.
+  // Uses syncedAt as an optimistic lock: only overwrites if the incoming
+  // data is newer than what's already stored (or the doc doesn't exist yet).
+  const ops = summaries.map((s) => {
+    const incomingSyncedAt = s.syncedAt ? new Date(s.syncedAt) : new Date();
+    return {
+      updateOne: {
+        filter: {
+          employeeId: s.employeeId,
+          date: s.date,
+          // Only update if we don't have this doc yet, or our data is newer
+          $or: [
+            { syncedAt: { $exists: false } },
+            { syncedAt: { $lte: incomingSyncedAt } },
+          ],
+        },
+        update: {
           $set: {
             totalWorkSec: s.totalWorkSec,
             sleepSec: s.sleepSec,
@@ -194,13 +218,25 @@ export async function processDailySummarySync(summaries: SyncDailySummary[], sou
             phoneCount: s.phoneCount,
             absenceSec: s.absenceSec,
             productivity: s.productivity,
+            syncedAt: incomingSyncedAt,
+          },
+          $setOnInsert: {
+            employeeId: s.employeeId,
+            date: s.date,
           },
         },
-        { upsert: true }
-      );
-      processed++;
+        upsert: true,
+      },
+    };
+  });
+
+  if (ops.length > 0) {
+    try {
+      const result = await DailySummary.bulkWrite(ops, { ordered: false });
+      processed = (result.upsertedCount ?? 0) + (result.modifiedCount ?? 0);
     } catch (err: any) {
-      errors.push({ index: i, employeeId: s.employeeId, error: err.message });
+      // bulkWrite with ordered:false continues past errors; capture them
+      errors.push({ index: -1, employeeId: 'bulk', error: err.message });
     }
   }
 
@@ -223,22 +259,23 @@ export async function processDetectionSync(
   let processed = 0;
   const errors: { index: number; employeeId: string; error: string }[] = [];
 
-  for (let i = 0; i < detections.length; i++) {
-    const det = detections[i];
-    try {
-      await Detection.create({
-        employeeId: det.employeeId,
-        timestamp: new Date(det.timestamp),
-        eventType: det.eventType,
-        confidence: det.confidence,
-        cameraId: det.cameraId,
-        metadata: det.metadata,
-      });
-      processed++;
-    } catch (err: any) {
-      errors.push({ index: i, employeeId: det.employeeId, error: err.message });
-    }
-  }
+  await Promise.all(
+    detections.map(async (det, i) => {
+      try {
+        await Detection.create({
+          employeeId: det.employeeId,
+          timestamp: new Date(det.timestamp),
+          eventType: det.eventType,
+          confidence: det.confidence,
+          cameraId: det.cameraId,
+          metadata: det.metadata,
+        });
+        processed++;
+      } catch (err: any) {
+        errors.push({ index: i, employeeId: det.employeeId, error: err.message });
+      }
+    })
+  );
 
   await SyncLog.create({
     direction: 'pyqt_to_web',

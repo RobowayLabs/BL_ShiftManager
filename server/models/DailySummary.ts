@@ -11,6 +11,7 @@ export interface IDailySummary extends Document {
   phoneCount: number;
   absenceSec: number;
   productivity: number;
+  syncedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,6 +28,7 @@ const DailySummarySchema = new Schema<IDailySummary>(
     phoneCount: { type: Number, default: 0 },
     absenceSec: { type: Number, default: 0 },
     productivity: { type: Number, default: 0, min: 0, max: 100 },
+    syncedAt: { type: Date },
   },
   { timestamps: true }
 );
