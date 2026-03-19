@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export interface IEmployee extends Document {
   employeeId: string;
@@ -21,4 +21,4 @@ const EmployeeSchema = new Schema<IEmployee>(
   { timestamps: true }
 );
 
-export default (mongoose.models.Employee || mongoose.model<IEmployee>('Employee', EmployeeSchema)) as ReturnType<typeof mongoose.model<IEmployee>>;
+export default (mongoose.models['Employee'] || mongoose.model<IEmployee>('Employee', EmployeeSchema)) as Model<IEmployee>;

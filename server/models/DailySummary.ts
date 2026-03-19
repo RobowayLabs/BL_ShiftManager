@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export interface IDailySummary extends Document {
   employeeId: string;
@@ -33,4 +33,4 @@ const DailySummarySchema = new Schema<IDailySummary>(
 
 DailySummarySchema.index({ employeeId: 1, date: 1 }, { unique: true });
 
-export default (mongoose.models.DailySummary || mongoose.model<IDailySummary>('DailySummary', DailySummarySchema)) as ReturnType<typeof mongoose.model<IDailySummary>>;
+export default (mongoose.models['DailySummary'] || mongoose.model<IDailySummary>('DailySummary', DailySummarySchema)) as Model<IDailySummary>;

@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export interface ISyncLog extends Document {
   direction: 'pyqt_to_web' | 'web_to_pyqt';
@@ -24,4 +24,4 @@ const SyncLogSchema = new Schema<ISyncLog>(
 
 SyncLogSchema.index({ createdAt: -1 });
 
-export default (mongoose.models.SyncLog || mongoose.model<ISyncLog>('SyncLog', SyncLogSchema)) as ReturnType<typeof mongoose.model<ISyncLog>>;
+export default (mongoose.models['SyncLog'] || mongoose.model<ISyncLog>('SyncLog', SyncLogSchema)) as Model<ISyncLog>;

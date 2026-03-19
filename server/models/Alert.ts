@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export interface IAlert extends Document {
   alertId: string;
@@ -39,4 +39,4 @@ const AlertSchema = new Schema<IAlert>(
 AlertSchema.index({ timestamp: -1 });
 AlertSchema.index({ employeeId: 1, timestamp: -1 });
 
-export default (mongoose.models.Alert || mongoose.model<IAlert>('Alert', AlertSchema)) as ReturnType<typeof mongoose.model<IAlert>>;
+export default (mongoose.models['Alert'] || mongoose.model<IAlert>('Alert', AlertSchema)) as Model<IAlert>;

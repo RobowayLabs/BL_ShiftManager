@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export interface IShift extends Document {
   shiftId: string;
@@ -65,7 +65,8 @@ const ShiftSchema = new Schema<IShift>(
   { timestamps: true }
 );
 
-ShiftSchema.pre('save', function (this: any, next: () => void) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(ShiftSchema as any).pre('save', function (this: any, next: () => void) {
   if (!this.startTime || !this.endTime) {
     const times = SHIFT_TIMES[this.type as string];
     if (times) {
@@ -79,4 +80,4 @@ ShiftSchema.pre('save', function (this: any, next: () => void) {
 ShiftSchema.index({ employeeId: 1, date: 1 });
 ShiftSchema.index({ date: 1, type: 1 });
 
-export default (mongoose.models.Shift || mongoose.model<IShift>('Shift', ShiftSchema)) as ReturnType<typeof mongoose.model<IShift>>;
+export default (mongoose.models['Shift'] || mongoose.model<IShift>('Shift', ShiftSchema)) as Model<IShift>;

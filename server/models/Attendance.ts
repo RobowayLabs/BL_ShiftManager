@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose, { Schema, Document, Model } from 'mongoose';
 
 export interface IAttendance extends Document {
   employeeId: string;
@@ -24,4 +24,4 @@ const AttendanceSchema = new Schema<IAttendance>(
 
 AttendanceSchema.index({ employeeId: 1, recognizedAt: -1 });
 
-export default (mongoose.models.Attendance || mongoose.model<IAttendance>('Attendance', AttendanceSchema)) as ReturnType<typeof mongoose.model<IAttendance>>;
+export default (mongoose.models['Attendance'] || mongoose.model<IAttendance>('Attendance', AttendanceSchema)) as Model<IAttendance>;
