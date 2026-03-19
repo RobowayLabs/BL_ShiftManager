@@ -22,13 +22,23 @@ import {
 import { StatCard } from "../components/StatCard";
 import { Badge } from "../components/Badge";
 import { useDashboard } from "../hooks/useDashboard";
-import { useAlerts } from "../hooks/useAlerts";
+import { useRealtimeStream } from "../hooks/useRealtimeStream";
+import { useGuest } from "../context/GuestContext";
 
 export const Dashboard = () => {
-  const { stats, trendData, distributionData, loading } = useDashboard(30000);
-  const { alerts } = useAlerts({ limit: '10' });
+  const { isGuest } = useGuest();
 
-  if (loading) {
+  // Polling fallback for charts (trend + distribution don't come via SSE)
+  const { trendData, distributionData, loading, stats: polledStats } = useDashboard();
+
+  // Real-time stream — overrides polled stats + alerts when connected
+  const { connected, stats: liveStats, alerts: liveAlerts, newAlertIds } = useRealtimeStream();
+
+  // Prefer live stats if available, fall back to polled
+  const stats = (!isGuest && liveStats) ? liveStats : polledStats;
+  const alerts = (!isGuest && liveAlerts.length > 0) ? liveAlerts : [];
+
+  if (loading && !stats) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-brand-text-muted">Loading dashboard...</div>
@@ -38,6 +48,7 @@ export const Dashboard = () => {
 
   return (
     <div className="space-y-6">
+      {/* Stat cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="Total Employees"
@@ -61,11 +72,21 @@ export const Dashboard = () => {
         />
       </div>
 
+      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-brand-card border border-brand-border rounded-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-semibold text-slate-100">Alert Trends (24h)</h3>
-            <Badge variant="info">Real-time</Badge>
+            {!isGuest && (
+              <div className="flex items-center gap-2">
+                <span
+                  className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400 animate-pulse' : 'bg-slate-500'}`}
+                />
+                <span className="text-xs text-brand-text-muted">
+                  {connected ? 'Live' : 'Connecting...'}
+                </span>
+              </div>
+            )}
           </div>
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">
@@ -108,9 +129,15 @@ export const Dashboard = () => {
         </div>
       </div>
 
+      {/* Alerts table */}
       <div className="bg-brand-card border border-brand-border rounded-lg overflow-hidden">
         <div className="p-6 border-b border-brand-border flex items-center justify-between">
           <h3 className="text-lg font-semibold text-slate-100">Recent System Alerts</h3>
+          {!isGuest && (
+            <span className="text-xs text-brand-text-muted">
+              {connected ? 'Updates every 5s' : 'Reconnecting...'}
+            </span>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -125,9 +152,18 @@ export const Dashboard = () => {
             </thead>
             <tbody className="divide-y divide-brand-border">
               {alerts.map((alert) => (
-                <tr key={alert.id} className="hover:bg-slate-800/30 transition-colors">
-                  <td className="px-6 py-4 text-sm font-mono text-brand-accent">{alert.id}</td>
-                  <td className="px-6 py-4 text-sm text-brand-text-muted">{format(new Date(alert.timestamp), 'MMM d, yyyy h:mm a')}</td>
+                <tr
+                  key={alert.id}
+                  className={`transition-colors duration-700 ${
+                    newAlertIds.has(alert.id)
+                      ? 'bg-brand-accent/10 hover:bg-brand-accent/15'
+                      : 'hover:bg-slate-800/30'
+                  }`}
+                >
+                  <td className="px-6 py-4 text-sm font-mono text-brand-accent">{alert.id.slice(-8)}</td>
+                  <td className="px-6 py-4 text-sm text-brand-text-muted">
+                    {format(new Date(alert.timestamp), 'MMM d, yyyy h:mm a')}
+                  </td>
                   <td className="px-6 py-4">
                     <Badge variant={alert.type === 'Critical' ? 'danger' : alert.type === 'Warning' ? 'warning' : 'info'}>
                       {alert.type}
@@ -139,7 +175,9 @@ export const Dashboard = () => {
               ))}
               {alerts.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-brand-text-muted">No alerts found</td>
+                  <td colSpan={5} className="px-6 py-8 text-center text-brand-text-muted">
+                    No alerts found
+                  </td>
                 </tr>
               )}
             </tbody>
