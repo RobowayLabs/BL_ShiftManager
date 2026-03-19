@@ -33,4 +33,4 @@ const DailySummarySchema = new Schema<IDailySummary>(
 
 DailySummarySchema.index({ employeeId: 1, date: 1 }, { unique: true });
 
-export default mongoose.model<IDailySummary>('DailySummary', DailySummarySchema);
+export default (mongoose.models.DailySummary || mongoose.model<IDailySummary>('DailySummary', DailySummarySchema)) as ReturnType<typeof mongoose.model<IDailySummary>>;

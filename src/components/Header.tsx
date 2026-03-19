@@ -1,3 +1,5 @@
+'use client';
+
 import { Bell, Search, User } from "lucide-react";
 import { Button } from "./Button";
 
@@ -32,7 +34,9 @@ export const Header = ({ title, userName, userRole }: HeaderProps) => {
         <div className="flex items-center gap-3 pl-2">
           <div className="text-right hidden sm:block">
             <p className="text-sm font-medium text-slate-100">{userName || 'Admin User'}</p>
-            <p className="text-[10px] text-brand-text-muted uppercase tracking-wider">{userRole === 'super_admin' ? 'Super Admin' : userRole === 'manager' ? 'Manager' : 'User'}</p>
+            <p className="text-[10px] text-brand-text-muted uppercase tracking-wider">
+              {userRole === 'super_admin' ? 'Super Admin' : userRole === 'manager' ? 'Manager' : userRole === 'guest' ? 'Guest Mode' : 'User'}
+            </p>
           </div>
           <div className="w-9 h-9 rounded-full bg-brand-accent/20 border border-brand-accent/30 flex items-center justify-center">
             <User className="w-5 h-5 text-brand-accent" />

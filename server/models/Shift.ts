@@ -65,9 +65,9 @@ const ShiftSchema = new Schema<IShift>(
   { timestamps: true }
 );
 
-ShiftSchema.pre('save', function (next) {
+ShiftSchema.pre('save', function (this: any, next: () => void) {
   if (!this.startTime || !this.endTime) {
-    const times = SHIFT_TIMES[this.type];
+    const times = SHIFT_TIMES[this.type as string];
     if (times) {
       this.startTime = times.start;
       this.endTime = times.end;
@@ -79,4 +79,4 @@ ShiftSchema.pre('save', function (next) {
 ShiftSchema.index({ employeeId: 1, date: 1 });
 ShiftSchema.index({ date: 1, type: 1 });
 
-export default mongoose.model<IShift>('Shift', ShiftSchema);
+export default (mongoose.models.Shift || mongoose.model<IShift>('Shift', ShiftSchema)) as ReturnType<typeof mongoose.model<IShift>>;

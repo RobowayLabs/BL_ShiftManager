@@ -1,3 +1,5 @@
+'use client';
+
 import { useState, useMemo, useEffect, type FC } from "react";
 import {
   format, addDays, parseISO, eachDayOfInterval,

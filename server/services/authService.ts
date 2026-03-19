@@ -1,146 +1,132 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { getDB } from '../config/db.js';
-import { JwtPayload } from '../middleware/jwtAuth.js';
-
-// Map SQLite role values to web app roles
-function mapRole(role: string): 'super_admin' | 'manager' {
-  return role === 'admin' || role === 'super_admin' ? 'super_admin' : 'manager';
-}
-// Map web role back to SQLite role
-function toDbRole(role: 'super_admin' | 'manager'): string {
-  return role === 'super_admin' ? 'admin' : 'manager';
-}
+import User from '../models/User';
+import { JwtPayload } from '../lib/apiAuth';
 
 export async function login(username: string, password: string) {
-  const db = getDB();
-
-  const user = db
-    .prepare('SELECT * FROM users WHERE username = ? AND active = 1')
-    .get(username) as any;
-
+  const user = await User.findOne({ username, active: true });
   if (!user) throw new Error('Invalid username or password');
 
-  const isMatch = await bcrypt.compare(password, user.password_hash);
+  const isMatch = await bcrypt.compare(password, user.passwordHash);
   if (!isMatch) throw new Error('Invalid username or password');
 
   const secret = process.env.JWT_SECRET;
   if (!secret) throw new Error('JWT_SECRET not configured');
 
-  const role = mapRole(user.role);
-
   const payload: JwtPayload = {
-    userId: String(user.id),
+    userId: user._id.toString(),
     username: user.username,
-    role,
+    role: user.role,
   };
 
   const token = jwt.sign(payload, secret, { expiresIn: '24h' });
 
-  db.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").run(user.id);
+  user.lastLogin = new Date();
+  await user.save();
 
   return {
     token,
-    user: { id: user.id, username: user.username, name: user.username, role },
+    user: {
+      id: user._id.toString(),
+      username: user.username,
+      name: user.name,
+      role: user.role,
+    },
   };
 }
 
 export async function getUserById(userId: string) {
-  const db = getDB();
-  const user = db
-    .prepare('SELECT id, username, role, last_login FROM users WHERE id = ? AND active = 1')
-    .get(Number(userId)) as any;
-  if (!user) throw new Error('User not found');
+  const user = await User.findById(userId);
+  if (!user || !user.active) throw new Error('User not found');
   return {
-    id: user.id,
+    id: user._id.toString(),
     username: user.username,
-    name: user.username,
-    role: mapRole(user.role),
-    lastLogin: user.last_login,
+    name: user.name,
+    role: user.role,
+    lastLogin: user.lastLogin?.toISOString() || null,
   };
 }
 
-/** Super Admin: list all active users */
-export function listUsers() {
-  const db = getDB();
-  const rows = db
-    .prepare("SELECT id, username, role, active, last_login FROM users ORDER BY id ASC")
-    .all() as any[];
-  return rows.map(u => ({
-    id: u.id,
+export async function listUsers() {
+  const users = await User.find().sort({ createdAt: 1 });
+  return users.map((u) => ({
+    id: u._id.toString(),
     username: u.username,
-    role: mapRole(u.role),
-    active: u.active === 1,
-    lastLogin: u.last_login,
+    role: u.role,
+    active: u.active,
+    lastLogin: u.lastLogin?.toISOString() || null,
   }));
 }
 
-/** Super Admin: create a new user */
-export async function createUser(username: string, password: string, role: 'super_admin' | 'manager') {
-  const db = getDB();
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+export async function createUser(
+  username: string,
+  password: string,
+  role: 'super_admin' | 'manager'
+) {
+  const existing = await User.findOne({ username });
   if (existing) throw new Error(`Username "${username}" is already taken.`);
 
   const hash = await bcrypt.hash(password, 10);
-  const result = db
-    .prepare("INSERT INTO users (username, password_hash, role, active) VALUES (?, ?, ?, 1)")
-    .run(username, hash, toDbRole(role)) as any;
-
-  return { id: result.lastInsertRowid, username, role };
+  const user = await User.create({
+    username,
+    passwordHash: hash,
+    role,
+    name: username,
+    active: true,
+  });
+  return { id: user._id.toString(), username, role };
 }
 
-/** Super Admin: update another user's username and/or role */
-export async function updateUser(targetId: number, data: { username?: string; password?: string; role?: 'super_admin' | 'manager' }) {
-  const db = getDB();
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId) as any;
+export async function updateUser(
+  targetId: string,
+  data: { username?: string; password?: string; role?: 'super_admin' | 'manager' }
+) {
+  const user = await User.findById(targetId);
   if (!user) throw new Error('User not found');
 
   if (data.username && data.username !== user.username) {
-    const clash = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(data.username, targetId);
+    const clash = await User.findOne({ username: data.username });
     if (clash) throw new Error(`Username "${data.username}" is already taken.`);
-    db.prepare('UPDATE users SET username = ? WHERE id = ?').run(data.username, targetId);
+    user.username = data.username;
   }
   if (data.password) {
-    const hash = await bcrypt.hash(data.password, 10);
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, targetId);
+    user.passwordHash = await bcrypt.hash(data.password, 10);
   }
-  if (data.role) {
-    db.prepare('UPDATE users SET role = ? WHERE id = ?').run(toDbRole(data.role), targetId);
-  }
+  if (data.role) user.role = data.role;
+
+  await user.save();
   return { success: true };
 }
 
-/** Super Admin: deactivate (soft-delete) a user */
-export function deactivateUser(targetId: number) {
-  const db = getDB();
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId) as any;
+export async function deactivateUser(targetId: string) {
+  const user = await User.findById(targetId);
   if (!user) throw new Error('User not found');
-  db.prepare('UPDATE users SET active = 0 WHERE id = ?').run(targetId);
+  user.active = false;
+  await user.save();
   return { success: true };
 }
 
-/** Super Admin: change their own credentials (requires old password verification) */
 export async function changeOwnCredentials(
   userId: string,
   oldPassword: string,
   newUsername?: string,
-  newPassword?: string,
+  newPassword?: string
 ) {
-  const db = getDB();
-  const user = db.prepare('SELECT * FROM users WHERE id = ? AND active = 1').get(Number(userId)) as any;
-  if (!user) throw new Error('User not found');
+  const user = await User.findById(userId);
+  if (!user || !user.active) throw new Error('User not found');
 
-  const isMatch = await bcrypt.compare(oldPassword, user.password_hash);
+  const isMatch = await bcrypt.compare(oldPassword, user.passwordHash);
   if (!isMatch) throw new Error('Current password is incorrect.');
 
   if (newUsername && newUsername !== user.username) {
-    const clash = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(newUsername, Number(userId));
+    const clash = await User.findOne({ username: newUsername });
     if (clash) throw new Error(`Username "${newUsername}" is already taken.`);
-    db.prepare('UPDATE users SET username = ? WHERE id = ?').run(newUsername, Number(userId));
+    user.username = newUsername;
   }
   if (newPassword) {
-    const hash = await bcrypt.hash(newPassword, 10);
-    db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hash, Number(userId));
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
   }
+
+  await user.save();
   return { success: true };
 }

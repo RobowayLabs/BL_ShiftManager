@@ -1,149 +1,143 @@
-import { getDB } from '../config/db.js';
+import Employee from '../models/Employee';
+import Shift from '../models/Shift';
+import Alert from '../models/Alert';
+import Attendance from '../models/Attendance';
 
-export function getEmployees(query: {
+export async function getEmployees(query: {
   search?: string;
   department?: string;
   active?: string;
 }) {
-  const db = getDB();
-
-  let sql =
-    'SELECT id, name, employee_id, department, active FROM employees WHERE 1=1';
-  const params: any[] = [];
+  const filter: Record<string, any> = {};
 
   if (query.search) {
-    sql += ' AND (name LIKE ? OR employee_id LIKE ?)';
-    params.push(`%${query.search}%`, `%${query.search}%`);
+    filter.$or = [
+      { name: { $regex: query.search, $options: 'i' } },
+      { employeeId: { $regex: query.search, $options: 'i' } },
+    ];
   }
-  if (query.department) {
-    sql += ' AND department = ?';
-    params.push(query.department);
-  }
-  if (query.active !== undefined) {
-    sql += ' AND active = ?';
-    params.push(query.active === 'true' ? 1 : 0);
-  }
+  if (query.department) filter.department = query.department;
+  if (query.active !== undefined) filter.active = query.active === 'true';
 
-  sql += ' ORDER BY name';
-
-  const rows = db.prepare(sql).all(...params) as any[];
+  const employees = await Employee.find(filter).sort({ name: 1 });
 
   return {
-    employees: rows.map((e) => ({
-      id: e.employee_id,
+    employees: employees.map((e) => ({
+      id: e.employeeId,
       name: e.name,
       department: e.department || '',
-      active: e.active === 1,
+      active: e.active,
     })),
-    total: rows.length,
+    total: employees.length,
   };
 }
 
-export function getEmployeeById(employeeId: string) {
-  const db = getDB();
-
-  const e = db
-    .prepare(
-      'SELECT id, name, employee_id, department, active FROM employees WHERE employee_id = ?'
-    )
-    .get(employeeId) as any;
-
+export async function getEmployeeById(employeeId: string) {
+  const e = await Employee.findOne({ employeeId });
   if (!e) throw new Error('Employee not found');
-
   return {
-    id: e.employee_id,
+    id: e.employeeId,
     name: e.name,
     department: e.department || '',
-    active: e.active === 1,
+    active: e.active,
   };
 }
 
-export function getEmployeePerformance(
+export async function getEmployeePerformance(
   employeeId: string,
   from: string,
   to: string
 ) {
-  const db = getDB();
-
-  const emp = db
-    .prepare('SELECT id, name, employee_id, department, active FROM employees WHERE employee_id = ?')
-    .get(employeeId) as any;
+  const emp = await Employee.findOne({ employeeId });
   if (!emp) throw new Error('Employee not found');
 
   // Shifts in range
-  const shiftRows = db.prepare(`
-    SELECT sa.id, sa.date, sa.status, sa.actual_start, sa.actual_end,
-           s.label AS shift_type, s.start_time, s.end_time
-    FROM shift_assignments sa
-    JOIN shifts s ON sa.shift_id = s.id
-    WHERE sa.employee_id = ? AND sa.date >= ? AND sa.date <= ?
-    ORDER BY sa.date ASC, s.label
-  `).all(emp.id, from, to) as any[];
+  const shiftDocs = await Shift.find({
+    employeeId,
+    date: { $gte: from, $lte: to },
+  }).sort({ date: 1, type: 1 });
 
-  // Alerts in range for this employee
-  const alertRows = db.prepare(`
-    SELECT alert_type, COUNT(*) as cnt
-    FROM alert_events
-    WHERE employee_id = ? AND date(timestamp) >= ? AND date(timestamp) <= ?
-    GROUP BY alert_type
-  `).all(employeeId, from, to) as any[];
+  // All alerts in range for this employee
+  const alertAgg = await Alert.aggregate([
+    {
+      $match: {
+        employeeId,
+        timestamp: {
+          $gte: new Date(from + 'T00:00:00'),
+          $lte: new Date(to + 'T23:59:59'),
+        },
+      },
+    },
+    { $group: { _id: '$category', count: { $sum: 1 } } },
+  ]);
 
-  const totalAlerts = { drowsy: 0, sleep: 0, phone: 0, absence: 0 };
-  for (const r of alertRows) {
-    const k = r.alert_type as keyof typeof totalAlerts;
-    if (k in totalAlerts) totalAlerts[k] = r.cnt;
+  const totalAlerts: Record<string, number> = { drowsy: 0, sleep: 0, phone: 0, absence: 0 };
+  for (const a of alertAgg) {
+    if (a._id in totalAlerts) totalAlerts[a._id] = a.count;
   }
 
-  // Attendance check-in/out per day
-  const attendanceRows = db.prepare(`
-    SELECT date(recognized_at) as day, event_type, MIN(recognized_at) as first_in, MAX(recognized_at) as last_out
-    FROM attendance
-    WHERE employee_id = ? AND date(recognized_at) >= ? AND date(recognized_at) <= ?
-    GROUP BY day, event_type
-  `).all(emp.id, from, to) as any[];
+  // Attendance by day
+  const attDocs = await Attendance.find({
+    employeeId,
+    recognizedAt: {
+      $gte: new Date(from + 'T00:00:00'),
+      $lte: new Date(to + 'T23:59:59'),
+    },
+  }).sort({ recognizedAt: 1 });
 
   const attendanceMap: Record<string, { checkIn?: string; checkOut?: string }> = {};
-  for (const r of attendanceRows) {
-    if (!attendanceMap[r.day]) attendanceMap[r.day] = {};
-    if (r.event_type === 'in') attendanceMap[r.day].checkIn = r.first_in?.split(' ')[1]?.slice(0, 5);
-    if (r.event_type === 'out') attendanceMap[r.day].checkOut = r.last_out?.split(' ')[1]?.slice(0, 5);
+  for (const a of attDocs) {
+    const day = a.recognizedAt.toISOString().split('T')[0];
+    if (!attendanceMap[day]) attendanceMap[day] = {};
+    const timeStr = a.recognizedAt.toISOString().split('T')[1].slice(0, 5);
+    if (a.eventType === 'in' && !attendanceMap[day].checkIn) attendanceMap[day].checkIn = timeStr;
+    if (a.eventType === 'out') attendanceMap[day].checkOut = timeStr;
   }
 
-  // Per-shift alert counts
-  const shifts = shiftRows.map((s) => {
-    const alertsForShift = db.prepare(`
-      SELECT alert_type, COUNT(*) as cnt
-      FROM alert_events
-      WHERE employee_id = ? AND date(timestamp) = ? AND (shift_label = ? OR shift_label = '')
-      GROUP BY alert_type
-    `).all(employeeId, s.date, s.shift_type) as any[];
+  // Per-shift performance
+  const shifts = await Promise.all(
+    shiftDocs.map(async (s) => {
+      const shiftAlerts = await Alert.aggregate([
+        {
+          $match: {
+            employeeId,
+            timestamp: {
+              $gte: new Date(s.date + 'T00:00:00'),
+              $lte: new Date(s.date + 'T23:59:59'),
+            },
+            $or: [
+              { shiftLabel: s.type },
+              { shiftLabel: '' },
+              { shiftLabel: { $exists: false } },
+            ],
+          },
+        },
+        { $group: { _id: '$category', count: { $sum: 1 } } },
+      ]);
 
-    const alerts = { drowsy: 0, sleep: 0, phone: 0, absence: 0 };
-    for (const a of alertsForShift) {
-      const k = a.alert_type as keyof typeof alerts;
-      if (k in alerts) alerts[k] = a.cnt;
-    }
-    const totalA = alerts.drowsy + alerts.sleep + alerts.phone + alerts.absence;
-    const grade =
-      totalA === 0 ? 'Excellent'
-      : totalA <= 2 ? 'Good'
-      : totalA <= 5 ? 'Fair'
-      : 'Poor';
+      const alerts: Record<string, number> = { drowsy: 0, sleep: 0, phone: 0, absence: 0 };
+      for (const a of shiftAlerts) {
+        if (a._id in alerts) alerts[a._id] = a.count;
+      }
+      const totalA = alerts.drowsy + alerts.sleep + alerts.phone + alerts.absence;
+      const grade =
+        totalA === 0 ? 'Excellent' : totalA <= 2 ? 'Good' : totalA <= 5 ? 'Fair' : 'Poor';
 
-    const att = attendanceMap[s.date] || {};
-    return {
-      id: String(s.id),
-      date: s.date,
-      shiftType: s.shift_type,
-      startTime: s.start_time,
-      endTime: s.end_time,
-      status: s.status,
-      checkIn: att.checkIn,
-      checkOut: att.checkOut,
-      alerts,
-      grade,
-    };
-  });
+      const att = attendanceMap[s.date] || {};
+      return {
+        id: s._id.toString(),
+        date: s.date,
+        shiftType: s.type,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        status: s.status,
+        checkIn: att.checkIn,
+        checkOut: att.checkOut,
+        alerts,
+        grade,
+      };
+    })
+  );
 
   const totalShifts = shifts.length;
   const completed = shifts.filter((s) => s.status === 'Completed').length;
@@ -152,14 +146,15 @@ export function getEmployeePerformance(
   const inProgress = shifts.filter((s) => s.status === 'In Progress').length;
   const attended = shifts.filter((s) => s.checkIn).length;
   const attendanceRate = totalShifts > 0 ? Math.round((attended / totalShifts) * 100) : 0;
-  const alertTotal = totalAlerts.drowsy + totalAlerts.sleep + totalAlerts.phone + totalAlerts.absence;
+  const alertTotal =
+    totalAlerts.drowsy + totalAlerts.sleep + totalAlerts.phone + totalAlerts.absence;
 
   return {
     employee: {
-      id: emp.employee_id,
+      id: emp.employeeId,
       name: emp.name,
       department: emp.department || '',
-      active: emp.active === 1,
+      active: emp.active,
     },
     period: { from, to },
     summary: {

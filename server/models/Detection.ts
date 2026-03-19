@@ -29,4 +29,4 @@ const DetectionSchema = new Schema<IDetection>(
 DetectionSchema.index({ employeeId: 1, timestamp: -1 });
 DetectionSchema.index({ eventType: 1, timestamp: -1 });
 
-export default mongoose.model<IDetection>('Detection', DetectionSchema);
+export default (mongoose.models.Detection || mongoose.model<IDetection>('Detection', DetectionSchema)) as ReturnType<typeof mongoose.model<IDetection>>;

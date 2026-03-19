@@ -24,4 +24,4 @@ const AttendanceSchema = new Schema<IAttendance>(
 
 AttendanceSchema.index({ employeeId: 1, recognizedAt: -1 });
 
-export default mongoose.model<IAttendance>('Attendance', AttendanceSchema);
+export default (mongoose.models.Attendance || mongoose.model<IAttendance>('Attendance', AttendanceSchema)) as ReturnType<typeof mongoose.model<IAttendance>>;

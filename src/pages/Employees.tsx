@@ -1,3 +1,5 @@
+'use client';
+
 import { useState } from "react";
 import { Search, Filter, BarChart2, TrendingUp, ArrowLeft } from "lucide-react";
 import { Badge } from "../components/Badge";
@@ -5,7 +7,9 @@ import { Button } from "../components/Button";
 import { Modal } from "../components/Modal";
 import { Employee } from "../types";
 import { useEmployees } from "../hooks/useEmployees";
+import { useGuest } from "../context/GuestContext";
 import { getEmployeePerformance, EmployeePerformance } from "../api/employees";
+import { generateMockPerformance } from "../data/mockData";
 import { format, subDays } from "date-fns";
 
 const todayStr = format(new Date(), "yyyy-MM-dd");
@@ -204,6 +208,7 @@ function PerformanceReportPage({
 }
 
 export const Employees = () => {
+  const { isGuest } = useGuest();
   const [searchTerm, setSearchTerm] = useState("");
   const { employees, loading } = useEmployees(searchTerm);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
@@ -234,7 +239,12 @@ export const Employees = () => {
     setPerfError("");
     setPerfLoading(true);
     try {
-      const data = await getEmployeePerformance(selectedEmployee.id, dateRange.from, dateRange.to);
+      let data: EmployeePerformance;
+      if (isGuest) {
+        data = generateMockPerformance(selectedEmployee.id, dateRange.from, dateRange.to);
+      } else {
+        data = await getEmployeePerformance(selectedEmployee.id, dateRange.from, dateRange.to);
+      }
       setPerfData(data);
       setIsDateModalOpen(false);
     } catch (err: any) {

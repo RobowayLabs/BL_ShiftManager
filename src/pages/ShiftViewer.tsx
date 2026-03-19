@@ -1,3 +1,5 @@
+'use client';
+
 import { format, addDays } from "date-fns";
 import { cn } from "../lib/utils";
 import { Clock } from "lucide-react";

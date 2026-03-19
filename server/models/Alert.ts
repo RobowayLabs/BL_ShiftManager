@@ -39,4 +39,4 @@ const AlertSchema = new Schema<IAlert>(
 AlertSchema.index({ timestamp: -1 });
 AlertSchema.index({ employeeId: 1, timestamp: -1 });
 
-export default mongoose.model<IAlert>('Alert', AlertSchema);
+export default (mongoose.models.Alert || mongoose.model<IAlert>('Alert', AlertSchema)) as ReturnType<typeof mongoose.model<IAlert>>;

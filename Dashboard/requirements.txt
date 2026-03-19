@@ -1,0 +1,22 @@
+# Sentinel Employee Monitor — Python Dependencies (specified versions)
+PyQt5>=5.15.9
+opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0
+mediapipe>=0.10.0
+deepface>=0.0.93
+faiss-cpu>=1.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+paho-mqtt>=1.6.1
+redis>=5.0.0
+ultralytics>=8.0.0
+scipy>=1.11.0
+tf-keras>=2.16.0
+# bcrypt for password hashing (NFR-4.4)
+bcrypt>=4.1.0
+# PDF export (FR-10)
+fpdf2>=2.7.0
+# SQLAlchemy optional ORM
+SQLAlchemy>=2.0.0
+pyinstaller>=6.0.0
+# Face recognition weights auto-download on first run (~250 MB)

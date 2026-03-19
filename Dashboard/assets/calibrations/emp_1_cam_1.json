@@ -1,0 +1,12 @@
+{
+  "employee_id": 1,
+  "employee_name": "Sihab",
+  "camera_id": 1,
+  "timestamp": "2026-03-11T02:25:44.516704",
+  "open_ear": 0.5212,
+  "closed_ear": 0.4104,
+  "open_mar": 0.002,
+  "yawn_mar": 1.2652,
+  "ear_threshold": 0.4713,
+  "mar_threshold": 0.5704
+}

@@ -1,3 +1,5 @@
+'use client';
+
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, Plus, AlertCircle, Clock, Download, FileText, CheckCircle2, Trash2 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, addMonths, subMonths } from "date-fns";
@@ -8,6 +10,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { useShifts } from "../hooks/useShifts";
 import { useEmployees } from "../hooks/useEmployees";
 import { useAuth } from "../context/AuthContext";
+import { useGuest } from "../context/GuestContext";
 import { createShift, deleteShift, updateShift } from "../api/shifts";
 import { Shift } from "../types";
 
@@ -20,6 +23,9 @@ const shiftTypeStyles: Record<string, string> = {
 
 export const ShiftPlanner = () => {
   const { isSuperAdmin } = useAuth();
+  const { isGuest, addGuestShift, updateGuestShift, removeGuestShift } = useGuest();
+  const canEdit = isSuperAdmin || isGuest; // guests can also edit in demo mode
+
   const [currentDate, setCurrentDate] = useState(new Date());
   const { shifts, refetch: refetchShifts } = useShifts();
   const { employees } = useEmployees();
@@ -57,7 +63,7 @@ export const ShiftPlanner = () => {
 
   // ── Add-shift handlers ──────────────────────────────────────────────────────
   const handleDayClick = (day: Date) => {
-    if (!isSuperAdmin) return;
+    if (!canEdit) return;
     setSelectedDay(day);
     setSelectedEmployeeId("");
     setSelectedShiftType('Morning');
@@ -72,8 +78,22 @@ export const ShiftPlanner = () => {
     setSaving(true);
     try {
       const dateStr = format(selectedDay, 'yyyy-MM-dd');
-      await createShift({ employeeId: selectedEmployeeId, date: dateStr, type: selectedShiftType });
-      await refetchShifts();
+      if (isGuest) {
+        addGuestShift({
+          id: `guest-${Date.now()}`,
+          employeeId: selectedEmployeeId,
+          date: dateStr,
+          type: selectedShiftType,
+          startTime: selectedShiftType === 'Morning' ? '08:00' : selectedShiftType === 'Afternoon' ? '16:00' : '00:00',
+          endTime:   selectedShiftType === 'Morning' ? '16:00' : selectedShiftType === 'Afternoon' ? '00:00' : '08:00',
+          status: 'Scheduled',
+          aiMetadata: { alerts: { drowsy: 0, sleep: 0, phone: 0, absence: 0 } },
+        });
+        await refetchShifts();
+      } else {
+        await createShift({ employeeId: selectedEmployeeId, date: dateStr, type: selectedShiftType });
+        await refetchShifts();
+      }
       setIsModalOpen(false);
       showToast(`Added: ${employee.name} → ${selectedShiftType}`);
     } catch (err: any) {
@@ -85,7 +105,7 @@ export const ShiftPlanner = () => {
 
   // ── Edit/cancel handlers ────────────────────────────────────────────────────
   const handleShiftBadgeClick = (e: React.MouseEvent, shift: Shift) => {
-    if (!isSuperAdmin) return;
+    if (!canEdit) return;
     e.stopPropagation(); // don't also open the "Add" modal
     setEditingShift(shift);
     setEditShiftType(shift.type);
@@ -103,8 +123,13 @@ export const ShiftPlanner = () => {
     if (!editingShift || updating) return;
     setUpdating(true);
     try {
-      await updateShift(editingShift.id, { type: editShiftType, status: editShiftStatus });
-      await refetchShifts();
+      if (isGuest) {
+        updateGuestShift(editingShift.id, { type: editShiftType, status: editShiftStatus });
+        await refetchShifts();
+      } else {
+        await updateShift(editingShift.id, { type: editShiftType, status: editShiftStatus });
+        await refetchShifts();
+      }
       closeEditModal();
       showToast('Shift updated successfully');
     } catch (err: any) {
@@ -117,8 +142,13 @@ export const ShiftPlanner = () => {
   const handleConfirmCancel = async () => {
     if (!editingShift) return;
     try {
-      await deleteShift(editingShift.id);
-      await refetchShifts();
+      if (isGuest) {
+        removeGuestShift(editingShift.id);
+        await refetchShifts();
+      } else {
+        await deleteShift(editingShift.id);
+        await refetchShifts();
+      }
       closeEditModal();
       showToast('Shift cancelled successfully');
     } catch (err: any) {
@@ -173,7 +203,7 @@ export const ShiftPlanner = () => {
             <Download className="w-4 h-4 mr-2" />
             Export Excel
           </Button>
-          {isSuperAdmin && (
+          {canEdit && (
             <Button onClick={() => { setSelectedDay(null); setIsModalOpen(true); }}>
               <Plus className="w-4 h-4 mr-2" />
               Assign Shift
@@ -210,7 +240,7 @@ export const ShiftPlanner = () => {
                 onClick={() => handleDayClick(day)}
                 className={cn(
                   "border-r border-b border-brand-border p-2 transition-colors relative group",
-                  isSuperAdmin ? "cursor-pointer hover:bg-slate-800/50" : "cursor-default",
+                  canEdit ? "cursor-pointer hover:bg-slate-800/50" : "cursor-default",
                   isSameDay(day, new Date()) && "bg-brand-accent/5"
                 )}
               >
@@ -228,11 +258,11 @@ export const ShiftPlanner = () => {
                     <div
                       key={shift.id}
                       onClick={(e) => handleShiftBadgeClick(e, shift)}
-                      title={`${shift.type}: ${empName(shift.employeeId)}${isSuperAdmin ? ' — click to edit' : ''}`}
+                      title={`${shift.type}: ${empName(shift.employeeId)}${canEdit ? ' — click to edit' : ''}`}
                       className={cn(
                         "text-[10px] px-1.5 py-0.5 rounded border truncate select-none",
                         shiftTypeStyles[shift.type] ?? shiftTypeStyles.Morning,
-                        isSuperAdmin && "cursor-pointer hover:brightness-125 active:scale-95 transition-all"
+                        canEdit && "cursor-pointer hover:brightness-125 active:scale-95 transition-all"
                       )}
                     >
                       <span className="font-bold">{shift.type[0]}·</span>{' '}
@@ -242,7 +272,7 @@ export const ShiftPlanner = () => {
                 </div>
 
                 {/* "+" hint on hover for empty add area */}
-                {isSuperAdmin && (
+                {canEdit && (
                   <div className="absolute bottom-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Plus className="w-3 h-3 text-brand-text-muted" />
                   </div>
@@ -261,7 +291,7 @@ export const ShiftPlanner = () => {
             <span>{type}</span>
           </div>
         ))}
-        {isSuperAdmin && (
+        {canEdit && (
           <span className="ml-auto text-brand-text-muted/50 italic text-[11px]">
             Click a shift badge to edit or cancel · Click a day cell to add
           </span>
@@ -269,7 +299,7 @@ export const ShiftPlanner = () => {
       </div>
 
       {/* ══ Modal: Add New Shift ════════════════════════════════════════════ */}
-      {isSuperAdmin && (
+      {canEdit && (
         <Modal
           isOpen={isModalOpen}
           onClose={() => setIsModalOpen(false)}
@@ -336,7 +366,7 @@ export const ShiftPlanner = () => {
       )}
 
       {/* ══ Modal: Manage (Edit / Cancel) Shift ════════════════════════════ */}
-      {isSuperAdmin && editingShift && (
+      {canEdit && editingShift && (
         <Modal
           isOpen={isEditModalOpen}
           onClose={closeEditModal}

@@ -1,93 +1,71 @@
-import { getDB } from '../config/db.js';
+import crypto from 'crypto';
+import Shift from '../models/Shift';
+import Employee from '../models/Employee';
+import Alert from '../models/Alert';
+import Attendance from '../models/Attendance';
 
 type ShiftType = 'Morning' | 'Afternoon' | 'Night';
 type ShiftStatus = 'Scheduled' | 'In Progress' | 'Completed' | 'Missed';
 
-// Get alert counts per type from alert_events for a specific employee/date/shift
-function getShiftAlerts(
-  db: any,
-  empIdText: string,
-  date: string,
-  shiftLabel: string
-) {
-  const rows = db
-    .prepare(
-      `SELECT alert_type, COUNT(*) as cnt
-       FROM alert_events
-       WHERE employee_id = ?
-         AND date(timestamp) = ?
-         AND (shift_label = ? OR shift_label = '')
-       GROUP BY alert_type`
-    )
-    .all(empIdText, date, shiftLabel) as any[];
+const SHIFT_TIMES: Record<ShiftType, { start: string; end: string }> = {
+  Morning:   { start: '08:00', end: '16:00' },
+  Afternoon: { start: '16:00', end: '00:00' },
+  Night:     { start: '00:00', end: '08:00' },
+};
 
-  const alerts = { drowsy: 0, sleep: 0, phone: 0, absence: 0 };
-  for (const r of rows) {
-    const k = r.alert_type as keyof typeof alerts;
-    if (k in alerts) alerts[k] = r.cnt;
+async function enrichShift(s: any) {
+  // Alert counts for this employee+date+shiftType
+  const alertAgg = await Alert.aggregate([
+    {
+      $match: {
+        employeeId: s.employeeId,
+        timestamp: {
+          $gte: new Date(s.date + 'T00:00:00'),
+          $lte: new Date(s.date + 'T23:59:59'),
+        },
+        $or: [
+          { shiftLabel: s.type },
+          { shiftLabel: '' },
+          { shiftLabel: { $exists: false } },
+        ],
+      },
+    },
+    { $group: { _id: '$category', count: { $sum: 1 } } },
+  ]);
+
+  const alerts: Record<string, number> = { drowsy: 0, sleep: 0, phone: 0, absence: 0 };
+  for (const a of alertAgg) {
+    if (a._id in alerts) alerts[a._id] = a.count;
   }
-  return alerts;
-}
 
-// Get actual check-in/out times from attendance table
-function getAttendanceTimes(db: any, empIntId: number, date: string) {
-  const rows = db
-    .prepare(
-      `SELECT event_type, recognized_at
-       FROM attendance
-       WHERE employee_id = ? AND date(recognized_at) = ?
-       ORDER BY recognized_at ASC`
-    )
-    .all(empIntId, date) as any[];
+  // Actual attendance times
+  const attDocs = await Attendance.find({
+    employeeId: s.employeeId,
+    recognizedAt: {
+      $gte: new Date(s.date + 'T00:00:00'),
+      $lte: new Date(s.date + 'T23:59:59'),
+    },
+  }).sort({ recognizedAt: 1 });
 
-  const inEvent = rows.find((r: any) => r.event_type === 'in');
-  const outEvent = [...rows].reverse().find((r: any) => r.event_type === 'out');
-
-  const toTimeStr = (dt: string | undefined) =>
-    dt ? dt.split(' ')[1]?.slice(0, 8) : undefined;
-
-  return {
-    actualStart: toTimeStr(inEvent?.recognized_at),
-    actualEnd: toTimeStr(outEvent?.recognized_at),
-  };
-}
-
-function rowToShift(db: any, r: any) {
-  const alerts = getShiftAlerts(db, r.emp_id_text, r.date, r.type);
-  const { actualStart, actualEnd } = getAttendanceTimes(db, r.emp_int_id, r.date);
+  const inEv = attDocs.find((a) => a.eventType === 'in');
+  const outEv = [...attDocs].reverse().find((a) => a.eventType === 'out');
+  const actualStart = inEv?.recognizedAt.toISOString().split('T')[1].slice(0, 8);
+  const actualEnd = outEv?.recognizedAt.toISOString().split('T')[1].slice(0, 8);
   const hasData = Object.values(alerts).some((v) => v > 0) || actualStart;
 
   return {
-    id: String(r.id),
-    employeeId: r.emp_id_text,
-    date: r.date,
-    type: r.type as ShiftType,
-    startTime: r.start_time,
-    endTime: r.end_time,
-    status: r.status as ShiftStatus,
-    aiMetadata: hasData
-      ? {
-          actualStart: actualStart ?? r.actual_start ?? undefined,
-          actualEnd: actualEnd ?? r.actual_end ?? undefined,
-          alerts,
-        }
-      : undefined,
+    id: s._id.toString(),
+    employeeId: s.employeeId,
+    date: s.date,
+    type: s.type,
+    startTime: s.startTime,
+    endTime: s.endTime,
+    status: s.status,
+    aiMetadata: hasData ? { actualStart, actualEnd, alerts } : undefined,
   };
 }
 
-const BASE_QUERY = `
-  SELECT
-    sa.id, sa.date, sa.status, sa.actual_start, sa.actual_end,
-    s.label  AS type,
-    s.start_time, s.end_time,
-    e.employee_id AS emp_id_text,
-    e.id          AS emp_int_id
-  FROM shift_assignments sa
-  JOIN shifts    s ON sa.shift_id    = s.id
-  JOIN employees e ON sa.employee_id = e.id
-`;
-
-export function getShifts(query: {
+export async function getShifts(query: {
   date?: string;
   from?: string;
   to?: string;
@@ -95,105 +73,97 @@ export function getShifts(query: {
   type?: string;
   status?: string;
 }) {
-  const db = getDB();
-  let sql = BASE_QUERY + ' WHERE 1=1';
-  const params: any[] = [];
+  const filter: Record<string, any> = {};
 
   if (query.date) {
-    sql += ' AND sa.date = ?';
-    params.push(query.date);
+    filter.date = query.date;
   } else {
-    if (query.from) { sql += ' AND sa.date >= ?'; params.push(query.from); }
-    if (query.to)   { sql += ' AND sa.date <= ?'; params.push(query.to); }
+    if (query.from || query.to) {
+      filter.date = {};
+      if (query.from) filter.date.$gte = query.from;
+      if (query.to) filter.date.$lte = query.to;
+    }
   }
-  if (query.employeeId) { sql += ' AND e.employee_id = ?'; params.push(query.employeeId); }
-  if (query.type)       { sql += ' AND s.label = ?';       params.push(query.type); }
-  if (query.status)     { sql += ' AND sa.status = ?';     params.push(query.status); }
+  if (query.employeeId) filter.employeeId = query.employeeId;
+  if (query.type) filter.type = query.type;
+  if (query.status) filter.status = query.status;
 
-  sql += ' ORDER BY sa.date DESC, s.label';
-
-  const rows = db.prepare(sql).all(...params) as any[];
-  const shifts = rows.map((r) => rowToShift(db, r));
+  const docs = await Shift.find(filter).sort({ date: -1, type: 1 });
+  const shifts = await Promise.all(docs.map(enrichShift));
   return { shifts, total: shifts.length };
 }
 
-export function getShiftById(id: string) {
-  const db = getDB();
-  const r = db.prepare(BASE_QUERY + ' WHERE sa.id = ?').get(Number(id)) as any;
-  if (!r) throw new Error('Shift not found');
-  return rowToShift(db, r);
+export async function getShiftById(id: string) {
+  const doc = await Shift.findById(id);
+  if (!doc) throw new Error('Shift not found');
+  return enrichShift(doc);
 }
 
-export function createShift(data: {
+export async function createShift(data: {
   employeeId: string;
   date: string;
   type: ShiftType;
 }) {
-  const db = getDB();
-
-  const emp = db
-    .prepare('SELECT id FROM employees WHERE employee_id = ?')
-    .get(data.employeeId) as any;
+  const emp = await Employee.findOne({ employeeId: data.employeeId });
   if (!emp) throw new Error(`Employee ${data.employeeId} not found`);
 
-  const tmpl = db
-    .prepare('SELECT id, start_time, end_time FROM shifts WHERE label = ?')
-    .get(data.type) as any;
-  if (!tmpl) throw new Error(`Shift type '${data.type}' not found`);
+  const times = SHIFT_TIMES[data.type];
+  if (!times) throw new Error(`Unknown shift type: ${data.type}`);
 
-  const existing = db
-    .prepare(
-      'SELECT id FROM shift_assignments WHERE employee_id = ? AND shift_id = ? AND date = ?'
-    )
-    .get(emp.id, tmpl.id, data.date);
-  if (existing)
-    throw new Error('A shift of this type already exists for this employee on this date');
-
-  const result = db
-    .prepare(
-      "INSERT INTO shift_assignments (employee_id, shift_id, date, status, created_at) VALUES (?, ?, ?, 'Scheduled', datetime('now'))"
-    )
-    .run(emp.id, tmpl.id, data.date);
-
-  return {
-    id: String(result.lastInsertRowid),
+  const existing = await Shift.findOne({
     employeeId: data.employeeId,
     date: data.date,
     type: data.type,
-    startTime: tmpl.start_time,
-    endTime: tmpl.end_time,
+  });
+  if (existing)
+    throw new Error('A shift of this type already exists for this employee on this date');
+
+  const doc = await Shift.create({
+    shiftId: crypto.randomUUID(),
+    employeeId: data.employeeId,
+    date: data.date,
+    type: data.type,
+    startTime: times.start,
+    endTime: times.end,
+    status: 'Scheduled',
+  });
+
+  return {
+    id: doc._id.toString(),
+    employeeId: data.employeeId,
+    date: data.date,
+    type: data.type,
+    startTime: times.start,
+    endTime: times.end,
     status: 'Scheduled' as ShiftStatus,
   };
 }
 
-export function updateShift(
+export async function updateShift(
   id: string,
   data: Partial<{ status: string; date: string; type: string }>
 ) {
-  const db = getDB();
-  const updates: string[] = [];
-  const params: any[] = [];
+  const update: Record<string, any> = {};
 
-  if (data.status) { updates.push('status = ?'); params.push(data.status); }
-  if (data.date)   { updates.push('date = ?');   params.push(data.date); }
+  if (data.status) update.status = data.status;
+  if (data.date) update.date = data.date;
   if (data.type) {
-    const tmpl = db.prepare('SELECT id FROM shifts WHERE label = ?').get(data.type) as any;
-    if (!tmpl) throw new Error(`Shift type '${data.type}' not found`);
-    updates.push('shift_id = ?');
-    params.push(tmpl.id);
+    const times = SHIFT_TIMES[data.type as ShiftType];
+    if (!times) throw new Error(`Shift type '${data.type}' not found`);
+    update.type = data.type;
+    update.startTime = times.start;
+    update.endTime = times.end;
   }
-  if (updates.length === 0) throw new Error('No valid fields to update');
 
-  params.push(Number(id));
-  db.prepare(`UPDATE shift_assignments SET ${updates.join(', ')} WHERE id = ?`).run(...params);
-  return getShiftById(id);
+  if (Object.keys(update).length === 0) throw new Error('No valid fields to update');
+
+  const doc = await Shift.findByIdAndUpdate(id, { $set: update }, { new: true });
+  if (!doc) throw new Error('Shift not found');
+  return enrichShift(doc);
 }
 
-export function deleteShift(id: string) {
-  const db = getDB();
-  const info = db
-    .prepare('DELETE FROM shift_assignments WHERE id = ?')
-    .run(Number(id));
-  if (info.changes === 0) throw new Error('Shift not found');
+export async function deleteShift(id: string) {
+  const doc = await Shift.findByIdAndDelete(id);
+  if (!doc) throw new Error('Shift not found');
   return { success: true };
 }

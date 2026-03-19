@@ -1,8 +1,11 @@
+'use client';
+
 import { useState, useEffect } from "react";
-import { UserCog, Key, Plus, Pencil, UserX, Eye, EyeOff, ShieldCheck, ShieldOff } from "lucide-react";
+import { UserCog, Key, Plus, Pencil, UserX, Eye, EyeOff, ShieldCheck, ShieldOff, MonitorPlay } from "lucide-react";
 import { Button } from "../components/Button";
 import { Modal } from "../components/Modal";
 import { useAuth } from "../context/AuthContext";
+import { useGuest } from "../context/GuestContext";
 import {
   listUsers,
   createUser,
@@ -396,7 +399,26 @@ function UserManagementSection() {
 
 export const Settings = () => {
   const { user } = useAuth();
+  const { isGuest } = useGuest();
   const isSuperAdmin = user?.role === "super_admin";
+
+  if (isGuest) {
+    return (
+      <div className="max-w-4xl space-y-10">
+        <div className="bg-brand-card border border-yellow-500/20 rounded-xl p-10 flex flex-col items-center gap-4 text-center">
+          <div className="w-14 h-14 rounded-full bg-yellow-500/10 flex items-center justify-center">
+            <MonitorPlay className="w-7 h-7 text-yellow-400" />
+          </div>
+          <div>
+            <p className="text-lg font-semibold text-slate-100">Settings unavailable in Guest Mode</p>
+            <p className="text-sm text-brand-text-muted mt-1 max-w-sm">
+              Credential changes and user management require a real account. Exit guest mode and sign in to access settings.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl space-y-10">

@@ -24,4 +24,4 @@ const SyncLogSchema = new Schema<ISyncLog>(
 
 SyncLogSchema.index({ createdAt: -1 });
 
-export default mongoose.model<ISyncLog>('SyncLog', SyncLogSchema);
+export default (mongoose.models.SyncLog || mongoose.model<ISyncLog>('SyncLog', SyncLogSchema)) as ReturnType<typeof mongoose.model<ISyncLog>>;

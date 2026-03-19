@@ -1,45 +1,46 @@
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
-import { connectDB, getDB } from './config/db.js';
+import mongoose from 'mongoose';
+import User from './models/User';
+import Employee from './models/Employee';
+import Shift from './models/Shift';
+import Alert from './models/Alert';
 
 async function seed() {
-  connectDB();
-  const db = getDB();
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error('MONGODB_URI not set in environment');
 
-  const adminHash   = await bcrypt.hash('admin123', 10);
+  await mongoose.connect(uri);
+  console.log('[Seed] Connected to MongoDB');
+
+  const adminHash = await bcrypt.hash('admin123', 10);
   const managerHash = await bcrypt.hash('manager123', 10);
 
-  // Upsert admin user (role = 'admin' → maps to super_admin in web)
-  db.prepare(`
-    INSERT INTO users (username, password_hash, role, active)
-    VALUES ('admin', ?, 'admin', 1)
-    ON CONFLICT(username) DO UPDATE SET
-      password_hash = excluded.password_hash,
-      role = 'admin',
-      active = 1
-  `).run(adminHash);
+  await User.findOneAndUpdate(
+    { username: 'admin' },
+    { $set: { username: 'admin', passwordHash: adminHash, role: 'super_admin', name: 'Admin', active: true } },
+    { upsert: true, new: true }
+  );
 
-  // Upsert manager user (role = 'manager' → maps to manager in web)
-  db.prepare(`
-    INSERT INTO users (username, password_hash, role, active)
-    VALUES ('manager', ?, 'manager', 1)
-    ON CONFLICT(username) DO UPDATE SET
-      password_hash = excluded.password_hash,
-      role = 'manager',
-      active = 1
-  `).run(managerHash);
+  await User.findOneAndUpdate(
+    { username: 'manager' },
+    { $set: { username: 'manager', passwordHash: managerHash, role: 'manager', name: 'Manager', active: true } },
+    { upsert: true, new: true }
+  );
 
-  // Show existing data stats
-  const empCount   = (db.prepare('SELECT COUNT(*) as cnt FROM employees').get() as any).cnt;
-  const alertCount = (db.prepare('SELECT COUNT(*) as cnt FROM alert_events').get() as any).cnt;
-  const shiftCount = (db.prepare('SELECT COUNT(*) as cnt FROM shifts').get() as any).cnt;
+  const [empCount, shiftCount, alertCount] = await Promise.all([
+    Employee.countDocuments(),
+    Shift.countDocuments(),
+    Alert.countDocuments(),
+  ]);
 
   console.log('[Seed] Done!');
   console.log('[Seed] Login credentials:');
   console.log('  Super Admin: admin / admin123');
   console.log('  Manager:     manager / manager123');
-  console.log(`[Seed] Existing DB data: ${empCount} employees, ${shiftCount} shift templates, ${alertCount} alerts`);
+  console.log(`[Seed] Existing data: ${empCount} employees, ${shiftCount} shifts, ${alertCount} alerts`);
 
+  await mongoose.disconnect();
   process.exit(0);
 }
 

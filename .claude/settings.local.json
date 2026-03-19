@@ -13,7 +13,12 @@
       "Bash(lsof -ti:3000)",
       "Bash(xargs kill -9)",
       "Bash(lsof -ti:4000)",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d[''''version'''']\\)\")"
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d[''''version'''']\\)\")",
+      "Bash(npm uninstall:*)",
+      "Bash(mkdir -p /Users/mdarifinahmedrafi/banglalink-shift-manager/app/api/auth/users/'[id]')",
+      "Bash(mkdir -p /Users/mdarifinahmedrafi/banglalink-shift-manager/app/api/employees/'[employeeId]'/performance)",
+      "Bash(mkdir -p /Users/mdarifinahmedrafi/banglalink-shift-manager/app/api/shifts/'[shiftId]')",
+      "Bash(mkdir -p /Users/mdarifinahmedrafi/banglalink-shift-manager/app/api/alerts/'[alertId]'/acknowledge)"
     ]
   }
 }

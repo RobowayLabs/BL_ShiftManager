@@ -1,10 +1,10 @@
-import Employee from '../models/Employee.js';
-import Shift from '../models/Shift.js';
-import Alert from '../models/Alert.js';
-import Detection from '../models/Detection.js';
-import Attendance from '../models/Attendance.js';
-import DailySummary from '../models/DailySummary.js';
-import SyncLog from '../models/SyncLog.js';
+import Employee from '../models/Employee';
+import Shift from '../models/Shift';
+import Alert from '../models/Alert';
+import Detection from '../models/Detection';
+import Attendance from '../models/Attendance';
+import DailySummary from '../models/DailySummary';
+import SyncLog from '../models/SyncLog';
 
 // Matches SQLite employees table
 interface SyncEmployee {

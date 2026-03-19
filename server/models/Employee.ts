@@ -21,4 +21,4 @@ const EmployeeSchema = new Schema<IEmployee>(
   { timestamps: true }
 );
 
-export default mongoose.model<IEmployee>('Employee', EmployeeSchema);
+export default (mongoose.models.Employee || mongoose.model<IEmployee>('Employee', EmployeeSchema)) as ReturnType<typeof mongoose.model<IEmployee>>;

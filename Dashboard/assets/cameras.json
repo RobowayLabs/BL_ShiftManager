@@ -1,0 +1,9 @@
+{
+  "cameras": [
+    {
+      "index": 0,
+      "label": "Camera 1",
+      "enabled": true
+    }
+  ]
+}
