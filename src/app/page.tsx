@@ -98,7 +98,7 @@ export default function AppPage() {
           onLogout={isGuest ? handleExitGuest : logout}
         />
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-          <Header title={getPageTitle()} userName={displayName} userRole={displayRole} />
+          <Header title={getPageTitle()} userName={displayName} userRole={displayRole} onNavigate={setActivePage} />
           <main className="flex-1 overflow-y-auto p-8">
             <AnimatePresence mode="wait">
               <motion.div
